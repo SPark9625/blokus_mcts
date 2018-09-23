@@ -1,14 +1,16 @@
-import time
+import time, datetime
 from math import sqrt, log
 import random
 from copy import deepcopy
+from util import switch_player
 import pickle
+
 
 BLUE, YELLOW = 1, 2
 
 
 class Node:
-  def __init__(self, state, player, parent, action_in, terminal=False, result=None, depth=None):
+  def __init__(self, state, player, parent, action_in, terminal=False, result=None, depth=None, cur_root=False):
     self.depth = depth
     self.state = state
     self.parent = parent
@@ -26,7 +28,7 @@ class Node:
 
   @property
   def mean(self):
-    return self.value/self.n_visit
+    return self.value/(self.n_visit + 1e-10)
 
   def print(self):
     print(f'Node {self.depth}:\n\taction_in: {self.action_in},\n\tnum_children: {len(self.children)},\
@@ -39,23 +41,25 @@ class Node:
 
 
 class UCT:
-  def __init__(self, env, player, player_list, budget, iter_budget=1600, exploration=1.4):
+  def __init__(self, env, player, player_list, time_budget, iter_budget=1600, exploration=1.4):
     """env has to have 2 APIs: env.step() and env.possible_actions()
       env.step() takes (state, action, player) as input and has to return: (next_state, reward, done, info)
       env.possible_actions() takes `state`, `player_id`, `piece_idx` as input and has to return a `list` of actions.
     """
     self.env = env
-    self.player = player
+    self.IAM = player
     self.player_list = player_list
-    self.opponent = BLUE if player == YELLOW else YELLOW
+    self.opponent = player_list[0] if player == player_list[1] else player_list[1]
+    assert len(self.player_list) == 2  # two player game for now
 
-    self.budget = budget  # seconds
+    self.time_budget = time_budget  # seconds
     self.iter_budget = iter_budget
     
     self.exploration = exploration
     self.nodes = {}
 
   def initialize(self):
+    # deprecated for now
     size = self.env.size
     try:
       fname = f'{size}x{size}.pkl'
@@ -64,78 +68,73 @@ class UCT:
         print(f'Reading tree data from {fname}.')
     except FileNotFoundError:
       s0 = self.env.reset()
-      root = Node(s0, self.player_list[0], parent=None, action_in=None, depth=0, cur_root=True)
-      self.nodes[s0.tobytes()] = root
+      root = Node(s0, player=self.IAM, parent=None, action_in=None, depth=0, cur_root=True)
+      self.nodes[s0.board.tobytes()] = root
+      print('***********************************')
       print(f'Initialized a new tree of size {size}x{size}')
+      print('***********************************')
 
-  def get_node(self, s0, player_id):
+  def get_node(self, s0, player):
     try:
-      node = self.nodes[s0.tobytes()]
+      node = self.nodes[s0.board.tobytes()]
       parent = node.parent
       while parent:
-        self.nodes.pop(parent.state.tobytes())
+        self.nodes.pop(parent.state.board.tobytes())
         parent = parent.parent
       node.parent = None
       return node
 
     except KeyError:
-      # node = Node(s0, player=player_id, parent=None, action_in=None, depth=0)
-      # self.nodes[s0.tobytes()] = node
-      # return node
-      raise KeyError('Did you forget to call <UCT>.initialize()')
+      node = Node(s0, player=player, parent=None, action_in=None, depth=0)
+      self.nodes[s0.board.tobytes()] = node
+      return node
+      # raise KeyError('Did you forget to call <UCT>.initialize()')
 
-  def get_action(self, state, piece_list):
-    cur_root = self.get_node(state, self.player)
+  def get_action(self, state):
+    """Assumes this function is NOT called on a terminal state"""
+    time_budget = self.time_budget
+    iter_budget = self.iter_budget
+    if state.board[0].sum() == 0:
+      time_budget = 1200
+
+    print('Start:',datetime.datetime.now())
+    print('Time budget:', time_budget)
+    print('Iteration budget:', iter_budget)
+    root = self.get_node(state, self.IAM)
+    root.cur_root = True
     t0 = time.time()
     iteration = 0
-    while time.time() - t0 < self.budget and iteration < self.iter_budget:
-      piece_list_copy = deepcopy(piece_list)
-      # print('entering tree_policy')
-      leaf_node = self.tree_policy(cur_root, piece_list_copy)
-      # print()
-      # leaf_node.print()
-      # print()
-      # print('finished tree_policy')
+    while time.time() - t0 < time_budget and iteration < iter_budget:
+      piece_list_copy = deepcopy(state.remaining_pieces_all)
+      leaf_node = self.tree_policy(root, piece_list_copy)
       
       if not leaf_node.terminal:
-        # print('entering default_policy')
         result = self.default_policy(leaf_node, piece_list_copy)
-        # print('finished default_policy')
       else:
-        # print('getting leaf_node.result')
         result = leaf_node.result
-        # print('leaf_node.result is:', result)
-      # print('backing up')
       self.backup(leaf_node, result)
-      # print('backed up')
       iteration += 1
       print('iteration:',iteration)
-      # print('------------------')
 
     print()
-    cur_root.children.sort(key=lambda x:x.mean, reverse=True)
-    for child in cur_root.children:
+    root.children.sort(key=lambda x:x.mean, reverse=True)
+    for child in root.children:
       print(child)
     print(f'Finished {iteration} iterations.')
-    best_node = self.best_child(cur_root)
+    best_node = self.best_child(root)
     action = best_node.action_in
+    root.cur_root = False
     return action
 
   def tree_policy(self, node, piece_list):
     while not node.terminal:
-      actions = self.env.possible_actions(node.state, node.player, piece_list[node.player])
+      actions = self.env.possible_actions(node.state, node.player)
 
       if len(actions) == 0:
-        # done, result = self.env.check_game_finished(node.state)
-        # if done:
-        #   node.terminal = True
-        #   node.result = result
-        #   break
-        # else:
-        node.player = self.switch_player(node.player)
+        node.player = switch_player(node.player, self.player_list)
         continue
 
-      elif 0 < len(node.children) < len(actions):
+      elif len(node.children) < len(actions):
         # not fully expanded
         return self.expand(node, actions, piece_list)
 
@@ -156,17 +155,17 @@ class UCT:
     
     dummy = 0
     while not terminal:
-      actions = self.env.possible_actions(state, player, piece_list[player])
+      actions = self.env.possible_actions(state, player)
       if len(actions) == 0:
         # print(f'player {player} has no more actions')
-        player = self.switch_player(player)
+        player = switch_player(player, self.player_list)
         continue
       action = random.choice(actions)
       first = True if len(piece_list[player]) == len(self.env.pieces) else False
-      state, result, terminal, info = self.env.step(state, action, player, self.player_list, piece_list, first=first)
+      state, result, terminal, info = self.env.step(state, player, action)
 
       piece_list[player].remove(action[0])
-      player = self.switch_player(player)
+      player = switch_player(player, self.player_list)
     return result
 
   def expand(self, node, actions, piece_list):
@@ -176,22 +175,19 @@ class UCT:
 
     action = random.choice(actions)
     first = True if len(piece_list[node.player]) == len(self.env.pieces) else False
-    next_state, reward, done, info = self.env.step(node.state, action, node.player, self.player_list, piece_list, first=first)
+    next_state, reward, done, info = self.env.step(node.state, node.player, action)
     piece_list[node.player].remove(action[0])
 
-    player = self.switch_player(node.player)
+    player = switch_player(node.player, self.player_list)
     kwargs = dict(
         state=next_state,
         player=player,
         parent=node,
         action_in=action,
         depth=node.depth + 1,
-        terminal=False,
-        result=None,
+        terminal=done,
+        result=reward if done else None
       )
-    if done:
-      kwargs['terminal'] = True
-      kwargs['result'] = reward
     
     next_node = Node(**kwargs)
     node.children.append(next_node)
@@ -199,7 +195,7 @@ class UCT:
 
   def backup(self, node, result):
     while node != None:
-      player_in = self.switch_player(node.player)
+      player_in = switch_player(node.player, self.player_list)
       node.n_visit += 1
       node.value += result[player_in]
       node = node.parent
@@ -217,11 +213,6 @@ class UCT:
         best = child
     return best
 
-
-  @staticmethod
-  def switch_player(player):
-    player = BLUE if player == YELLOW else YELLOW
-    return player
 
 if __name__ == '__main__':
   import numpy as np, sys

@@ -1,4 +1,4 @@
-import random
+import random, sys
 from model import Blokus
 from mcts import UCT
 import datetime
@@ -10,7 +10,10 @@ from util import *
 
 
 if __name__ == '__main__':
-  BOARD_SIZE = 5
+  BOARD_SIZE = 13
+  TIME_BUDGET = 600
+  ITER_BUDGET = 1600
+
   BLUE, YELLOW = 1, 2
   num_players = 2
 
@@ -18,7 +21,7 @@ if __name__ == '__main__':
   human, computer = determine_roles(player_list)
 
   env = Blokus(size=BOARD_SIZE, player_list=player_list)
-  mcts = UCT(env, computer, player_list, budget=60, iter_budget=1600, exploration=1.4)
+  mcts = UCT(env, computer, player_list, time_budget=TIME_BUDGET, iter_budget=ITER_BUDGET, exploration=1.4)
   # mcts.initialize()
   
   
@@ -28,7 +31,7 @@ if __name__ == '__main__':
   state = env.reset()
   cur_player = player_list[0]
   print(f'Initial state:')
-  print(state.board)
+  print(state.board[0])
 
 
 
@@ -50,7 +53,7 @@ if __name__ == '__main__':
       action_helper(actions, threshold=10)
 
       while True:
-        action = ask_action()
+        action = ask_action(actions)
         if env.place_possible(state.board, cur_player, action):
           break
         else:
@@ -63,13 +66,12 @@ if __name__ == '__main__':
       action_helper(actions, threshold=10)
 
       while True:
-        action = ask_action()
+        action = ask_action(actions)
         if env.place_possible(state.board, cur_player, action):
           break
         else:
           print('That\'s not possible. Choose another place')
-      # print('Start:',datetime.datetime.now())
-      # action = mcts.get_action(state, remaining_pieces_all)
+      # action = mcts.get_action(state)
 
       print('Computer action:', action)
 
@@ -85,7 +87,7 @@ if __name__ == '__main__':
 
 
     print(f'Turn {turn}:')
-    print(state.board, end='\n\n')
+    print(state.board[0], end='\n\n')
 
     if done:
       print('Game finished. Rewards:', reward)

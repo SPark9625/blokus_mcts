@@ -5,11 +5,17 @@ def switch_player(player, player_list):
     return player_list[0]
   return player + 1
 
-def ask_action():
+def ask_action(actions):
   while True:
     input_ = input('Input an action in the format (piece_id, i, j, r, f): ').strip().lower()
     if input_ == 'q':
       sys.exit()
+    elif input_.startswith('!'):
+      try:
+        eval(input_[1:])
+        continue
+      except:
+        continue
     try:
       action = eval(input_)
       assert isinstance(action, tuple) and len(action) == 5

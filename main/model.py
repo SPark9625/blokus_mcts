@@ -2,6 +2,10 @@ import numpy as np
 from copy import deepcopy
 from collections import namedtuple
 
+import matplotlib as mpl
+mpl.use('TkAgg')
+import matplotlib.pyplot as plt
+
 State = namedtuple('State', ['board', 'remaining_pieces_all', 'first'])
 
 
@@ -16,6 +20,7 @@ class Blokus:
     with open('pieces.txt', 'r') as f:
       for idx, line in enumerate(f):
         block, corners, neighbors_idx, diagonals_idx, meta = eval(line)
+
         block = np.array(block)
         corners = np.array(corners)
         width, height = len(block[0]), len(block)
@@ -26,26 +31,45 @@ class Blokus:
         for _i,_j in diagonals_idx:
           diagonals[1+_i,1+_j] = 1
 
-        all_data = {}
+        piece = {}
+        # all_data = set()
         for i in range(4):
-          rot = np.rot90(block, i)
-          rot_already_in = np.array([np.array_equal(rot, d) for d in all_data.values()]).any()
+          rot_block = np.rot90(block, i)
+          rot_corners = np.rot90(corners, i)
+          rot_neighbors = np.rot90(neighbors, i)
+          rot_diagonals = np.rot90(diagonals, i)
+
+          # block_data = [d['block'] for d in piece.values()]
+          rot_already_in = np.array([np.array_equal(rot_block, d) for d in [d[0] for d in piece.values()]]).any()
+          # rot_already_in = (rot_block.tobytes() in all_data)
           if not rot_already_in:
-            all_data[(i,0)] = rot
+            # all_data.add(rot_block.tobytes())
+            piece[(i,0)] = [rot_block, rot_corners, rot_neighbors, rot_diagonals]
+            # {
+            #   'block': rot_block,
+            #   'corners': rot_corners,
+            #   'neighbors': rot_neighbors,
+            #   'diagonals': rot_diagonals
+            # }
 
-          flip = np.fliplr(rot)
-          flip_already_in = np.array([np.array_equal(flip, d) for d in all_data.values()]).any()
+          flip_block = np.fliplr(rot_block)
+          flip_corners = np.fliplr(rot_corners)
+          flip_neighbors = np.fliplr(rot_neighbors)
+          flip_diagonals = np.fliplr(rot_diagonals)
+
+          flip_already_in = np.array([np.array_equal(flip_block, d) for d in [d[0] for d in piece.values()]]).any()
+          # flip_already_in = (flip_block.tobytes() in all_data)
           if not flip_already_in:
-            all_data[(i,1)] = flip
-        self.pieces[idx] = {
-          'block': block,
-          'corners': corners,
-          'neighbors': neighbors,
-          'diagonals':diagonals,
-          'rotflip':all_data.keys()
-        }
+            # all_data.add(flip_block.tobytes())
+            piece[(i,1)] = [flip_block, flip_corners, flip_neighbors, flip_diagonals]
+            # {
+            #   'block': flip_block,
+            #   'corners': flip_corners,
+            #   'neighbors': flip_neighbors,
+            #   'diagonals': flip_diagonals
+            # }
+        self.pieces[idx] = piece
 
-  # OK
   def reset(self):
     '''board[0]: main board,
     board[1 : num_players + 1]: diagonals,
@@ -90,7 +114,10 @@ class Blokus:
 
     idx, i, j, rot, flip = action
     
+    # later change back
     block, corners, neighbors, diagonals = self.__adjust(self.pieces[idx], rot, flip)
+    # block, corners, neighbors, diagonals = self.pieces[idx][(rot, flip)]
+
     block *= player
     width, height = len(block[0]), len(block)
     # update main board: assumes a valid action, thus just add.
@@ -137,17 +164,13 @@ class Blokus:
     next_state = State(next_board, remaining_pieces_all, first)
 
     done = self.__check_game_finished(next_state)
-    reward = [0,0,0]
+    reward = {p:0 for p in self.player_list}
     if done:
       scores = []
       for idx in self.player_list:
         score = np.sum(next_board[0] == idx)
         scores.append(score)
-      reward = [0,1,-1] if scores[0] > scores[1] else [0,-1,1]
-
-    
-    
-
+      reward = {1:1, 2:-1} if scores[0] > scores[1] else {1:-1, 2:1}
     return next_state, reward, done, None
 
   def possible_actions(self, state, player):
@@ -156,8 +179,8 @@ class Blokus:
     for idx in state.remaining_pieces_all[player]:
       piece = self.pieces[idx]
       # for all rotation/flip
-      for r, f in piece['rotflip']:
-        block, corners, neighbors, diagonals = self.__adjust(piece, r, f)
+      for (r, f), data in piece.items():
+        block, corners, neighbors, diagonals = data#data['block'], data['corners'], data['neighbors'], data['diagonals']
         width, height = len(block[0]), len(block)
         # for all diagonals (on the board)
         for diag_pos in np.argwhere(state.board[player]):
@@ -174,11 +197,13 @@ class Blokus:
                 actions.append(action)
     return actions
 
-  # OK
   def place_possible(self, board, player, action):
     idx, i, j, rot, flip = action
 
+    # later change back
+    piece = self.pieces[idx]
     block, corners, neighbors, diagonals = self.__adjust(self.pieces[idx], rot, flip)
+    # block, corners, neighbors, diagonals = piece[(rot, flip)]
     width, height = len(block[0]), len(block)
 
     # check overlap
@@ -198,7 +223,6 @@ class Blokus:
 
     return False
 
-  # OK
   def check_player_finished(self, state, player):
     # if this player doesn't have anymore diagonals, he's done.
     actions = self.possible_actions(state, player)
@@ -206,7 +230,6 @@ class Blokus:
       return True
     return False
 
-  # OK
   def __check_game_finished(self, state):
     # 꼭지점이 있어도 게임이 끝나는 경우가 많아서 이 방식을 사용하려면 플레이어가 액션이 더이상 없을때 state에 diagonal을 전부 없애주는 식으로 해야함.
     # 근데 우선은 그냥 이 함수 내에서 모든 플레이어에 대해 끝났는지 확인하고 있음.
@@ -236,13 +259,12 @@ class Blokus:
         return False
     return True
 
-  # OK
   @staticmethod
   def __adjust(piece, r, f):
-    block = piece['block'].copy()
-    corners = piece['corners'].copy()
-    neighbors = piece['neighbors'].copy()
-    diagonals = piece['diagonals'].copy()
+    block = piece[(0,0)][0].copy()
+    corners = piece[(0,0)][1].copy()
+    neighbors = piece[(0,0)][2].copy()
+    diagonals = piece[(0,0)][3].copy()
 
     block = np.rot90(block, r)
     corners = np.rot90(corners, r)
@@ -285,7 +307,6 @@ class Blokus:
     y_slice = slice(y_top, y_bottom)
     return diagonals, neighbors, (x_slice, y_slice)
 
-  # OK
   def next_player(self, player):
     if player == self.player_list[-1]:
       return self.player_list[0]
