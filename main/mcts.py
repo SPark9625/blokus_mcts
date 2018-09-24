@@ -1,3 +1,4 @@
+import sys
 import time, datetime
 from math import sqrt, log
 import random
@@ -7,7 +8,9 @@ import pickle
 
 
 BLUE, YELLOW = 1, 2
-
+# 1. Node 에 actions를 달아서 tree policy할 때 빠르게.
+# => 이거 하려면 state에 player 넣어도 될듯. 그러면 Node 생성할때도 그냥 player 그대로 넣으면 되고, switch_player같은 함수는 다 없애도됨.
+# 2. 
 
 class Node:
   def __init__(self, state, player, parent, action_in, terminal=False, result=None, depth=None, cur_root=False):
@@ -60,33 +63,32 @@ class UCT:
 
   def initialize(self):
     # deprecated for now
-    size = self.env.size
-    try:
-      fname = f'{size}x{size}.pkl'
-      with open(fname, 'rb') as f:
-        self.nodes = pickle.load(f)
-        print(f'Reading tree data from {fname}.')
-    except FileNotFoundError:
-      s0 = self.env.reset()
-      root = Node(s0, player=self.IAM, parent=None, action_in=None, depth=0, cur_root=True)
-      self.nodes[s0.board.tobytes()] = root
-      print('***********************************')
-      print(f'Initialized a new tree of size {size}x{size}')
-      print('***********************************')
+    pass
+    # size = self.env.size
+    # try:
+    #   fname = f'{size}x{size}.pkl'
+    #   with open(fname, 'rb') as f:
+    #     self.nodes = pickle.load(f)
+    #     print(f'Reading tree data from {fname}.')
+    # except FileNotFoundError:
+    #   s0 = self.env.reset()
+    #   root = Node(s0, player=self.IAM, parent=None, action_in=None, depth=0, cur_root=True)
+    #   self.nodes[s0.board[0].tobytes()] = root
+    #   print('***********************************')
+    #   print(f'Initialized a new tree of size {size}x{size}')
+    #   print('***********************************')
 
   def get_node(self, s0, player):
     try:
-      node = self.nodes[s0.board.tobytes()]
-      parent = node.parent
-      while parent:
-        self.nodes.pop(parent.state.board.tobytes())
-        parent = parent.parent
+      node = self.nodes[s0.board[0].tobytes()]
       node.parent = None
+      print("Returning the requested Node...")
       return node
 
     except KeyError:
       node = Node(s0, player=player, parent=None, action_in=None, depth=0)
-      self.nodes[s0.board.tobytes()] = node
+      self.nodes[s0.board[0].tobytes()] = node
+      print("Couldn't find the requested Node. Creating a new one...")
       return node
       # raise KeyError('Did you forget to call <UCT>.initialize()')
 
@@ -94,8 +96,6 @@ class UCT:
     """Assumes this function is NOT called on a terminal state"""
     time_budget = self.time_budget
     iter_budget = self.iter_budget
-    if state.board[0].sum() == 0:
-      time_budget = 1200
 
     print('Start:',datetime.datetime.now())
     print('Time budget:', time_budget)
@@ -114,9 +114,11 @@ class UCT:
         result = leaf_node.result
       self.backup(leaf_node, result)
       iteration += 1
-      print('iteration:',iteration)
+      sys.stdout.write(f'\r__iteration: {iteration}__')
+      sys.stdout.flush()
+      
 
-    print()
+    print('\n')
     root.children.sort(key=lambda x:x.mean, reverse=True)
     for child in root.children:
       print(child)
@@ -190,6 +192,7 @@ class UCT:
       )
     
     next_node = Node(**kwargs)
+    self.nodes[next_state.board[0].tobytes()] = next_node
     node.children.append(next_node)
     return next_node
 

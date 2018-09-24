@@ -6,7 +6,7 @@ import matplotlib as mpl
 mpl.use('TkAgg')
 import matplotlib.pyplot as plt
 
-State = namedtuple('State', ['board', 'remaining_pieces_all', 'first'])
+State = namedtuple('State', ['board', 'remaining_pieces_all', 'first', 'done'])
 
 
 class Blokus:
@@ -21,11 +21,11 @@ class Blokus:
       for idx, line in enumerate(f):
         block, corners, neighbors_idx, diagonals_idx, meta = eval(line)
 
-        block = np.array(block)
-        corners = np.array(corners)
+        block = np.array(block, dtype=np.uint8)
+        corners = np.array(corners, dtype=np.uint8)
         width, height = len(block[0]), len(block)
-        neighbors = np.zeros((height + 2, width + 2))
-        diagonals = np.zeros((height + 2, width + 2))
+        neighbors = np.zeros((height + 2, width + 2), dtype=np.uint8)
+        diagonals = np.zeros((height + 2, width + 2), dtype=np.uint8)
         for _i,_j in neighbors_idx:
           neighbors[1+_i,1+_j] = 1
         for _i,_j in diagonals_idx:
@@ -80,7 +80,7 @@ class Blokus:
     first = dict with key(player), value(bool)
     '''
     layer_depth = 1 + 2 * self.num_players
-    board = np.zeros((layer_depth, self.size, self.size))
+    board = np.zeros((layer_depth, self.size, self.size), dtype=np.uint8)
 
     # # for all players, they can place their piece in any corner on the board on their first move
     # board[1:self.num_players+1, [0,0,self.size-1,self.size-1],[0,self.size-1,0,self.size-1]] = 1
@@ -94,8 +94,9 @@ class Blokus:
     piece_keys = [list(self.pieces.keys()) for i in range(self.num_players)]
     remaining_pieces_all = {p: p_list for p, p_list in zip(self.player_list, piece_keys)}
     first = {p: True for p in self.player_list}
+    done = {p: False for p in self.player_list}
     
-    state = State(board, remaining_pieces_all, first)
+    state = State(board, remaining_pieces_all, first, done)
     return state
 
 
@@ -107,6 +108,7 @@ class Blokus:
     next_board = state.board.copy()
     remaining_pieces_all = deepcopy(state.remaining_pieces_all)
     first = deepcopy(state.first)
+    done = deepcopy(state.done)
 
     can_place = self.place_possible(state.board, player, action)
     if not can_place:
@@ -122,6 +124,10 @@ class Blokus:
     width, height = len(block[0]), len(block)
     # update main board: assumes a valid action, thus just add.
     next_board[0, i:i+height, j:j+width] += block
+
+    if first[player]:
+      next_board[player,[0,0,self.size-1,self.size-1],[0,self.size-1,0,self.size-1]] = 0
+      first[player] = False
 
     # calculate outer slices
     x_left, y_top = j-1,i-1
@@ -155,23 +161,25 @@ class Blokus:
     diagonals[np.logical_and(diagonal_focus, diagonals)] = 0
     next_board[player, y_slice, x_slice] += diagonals
 
-    if first[player]:
-      next_board[player,[0,0,self.size-1,self.size-1],[0,self.size-1,0,self.size-1]] = 0
-      first[player] = False
-
     remaining_pieces_all[player].remove(action[0])
     next_player = self.next_player(player)
-    next_state = State(next_board, remaining_pieces_all, first)
+    next_state = State(next_board, remaining_pieces_all, first, done)
 
-    done = self.__check_game_finished(next_state)
+    # next_actions = self.possible_actions(next_state, player)
+    # if len(next_actions) == 0:
+    #   next_state.done[player] = True
+    game_done = self.check_game_finished(next_state)
     reward = {p:0 for p in self.player_list}
-    if done:
+    if game_done:
       scores = []
       for idx in self.player_list:
         score = np.sum(next_board[0] == idx)
         scores.append(score)
-      reward = {1:1, 2:-1} if scores[0] > scores[1] else {1:-1, 2:1}
-    return next_state, reward, done, None
+      if scores[0] > scores[1]:
+        reward = {1:1, 2:-1}
+      elif scores[0] < scores[1]:
+        reward = {1:-1, 2:1}
+    return next_state, reward, game_done, None
 
   def possible_actions(self, state, player):
     actions = []
@@ -224,13 +232,30 @@ class Blokus:
     return False
 
   def check_player_finished(self, state, player):
-    # if this player doesn't have anymore diagonals, he's done.
-    actions = self.possible_actions(state, player)
-    if len(actions) == 0:
-      return True
-    return False
+    for idx in state.remaining_pieces_all[player]:
+      piece = self.pieces[idx]
+      for (r, f), data in piece.items():
+        block, corners, neighbors, diagonals = data
+        width, height = len(block[0]), len(block)
+        for diag_pos in np.argwhere(state.board[player]):
+          for offset in np.argwhere(corners):
+            pos = diag_pos - offset
+            if np.any(pos < 0) or np.any(pos+[height, width] > self.size):
+              continue
+            else:
+              i, j = pos
+              action = (idx, i, j, r, f)
+              if self.place_possible(state.board, player, action):
+                return False
+    return True
 
-  def __check_game_finished(self, state):
+  def check_game_finished(self, state):
+    for player in self.player_list:
+      if not state.done[player]:
+        if not self.check_player_finished(state, player):
+          return False
+        state.done[player] = True
+    return True
     # 꼭지점이 있어도 게임이 끝나는 경우가 많아서 이 방식을 사용하려면 플레이어가 액션이 더이상 없을때 state에 diagonal을 전부 없애주는 식으로 해야함.
     # 근데 우선은 그냥 이 함수 내에서 모든 플레이어에 대해 끝났는지 확인하고 있음.
     # return: WIN = 1, LOSE = -1, UNDETERMINED = 0
@@ -252,12 +277,6 @@ class Blokus:
     #       reward.append(1)
     #   return True, reward
     # return False, [0,0,0]
-
-    for player in self.player_list:
-      player_actions = self.possible_actions(state, player)
-      if len(player_actions) > 0:
-        return False
-    return True
 
   @staticmethod
   def __adjust(piece, r, f):

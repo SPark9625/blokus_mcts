@@ -10,8 +10,8 @@ from util import *
 
 
 if __name__ == '__main__':
-  BOARD_SIZE = 13
-  TIME_BUDGET = 600
+  BOARD_SIZE = 5
+  TIME_BUDGET = 60
   ITER_BUDGET = 1600
 
   BLUE, YELLOW = 1, 2
@@ -41,11 +41,13 @@ if __name__ == '__main__':
     # This player is finished.
     # This does not mean that the game has finished though, so just switch player and continue.
     if len(actions) == 0:
-      print('Skipping')
       cur_player = switch_player(cur_player, player_list)
+      print('Skipping')
       continue
 
-    # get action from player
+    # ------------------------ #
+    #  get action from player  #
+    # ------------------------ #
     elif cur_player == human:
       print(f'Player\'s turn. You have {len(actions)} actions left')
 
@@ -59,29 +61,34 @@ if __name__ == '__main__':
         else:
           print('That\'s not possible. Choose another place')
 
-
-    # get action from MCTS
+    # ---------------------- #
+    #  get action from MCTS  #
+    # ---------------------- #
     else:
       print(f'Computer\'s turn. Computer has {len(actions)} actions left')
       action_helper(actions, threshold=10)
 
-      while True:
-        action = ask_action(actions)
-        if env.place_possible(state.board, cur_player, action):
-          break
-        else:
-          print('That\'s not possible. Choose another place')
-      # action = mcts.get_action(state)
+      # while True:
+      #   action = ask_action(actions)
+      #   if env.place_possible(state.board, cur_player, action):
+      #     break
+      #   else:
+      #     print('That\'s not possible. Choose another place')
+      action = mcts.get_action(state)
 
       print('Computer action:', action)
 
 
+    # ---------------------- #
+    #       env.step()       #
+    # ---------------------- #
     state, reward, done, _ = env.step(state, cur_player, action)
 
 
 
-
-    # bookkeeping
+    # ---------------------- #
+    #      bookkeeping       #
+    # ---------------------- #
     turn += 1
     cur_player = switch_player(cur_player, player_list)
 

@@ -22,7 +22,6 @@ def ask_action(actions):
       break
     except:
       print('That\'s not a valid action input. Try again.')
-
   return action
 
 def determine_roles(player_list):
