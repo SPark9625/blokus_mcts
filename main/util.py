@@ -1,5 +1,18 @@
 import sys
 
+class Board:
+  def __init__(self, state):
+    '''This class is purely for visualization'''
+    self.state = state
+    self.template = {0: '.', 1: 'O', 2: 'X'}
+    self.size = len(state)
+    row = '[' + ' '.join(['{}'] * self.size) + ']'
+    self.total = '\n'.join([row] * self.size)
+
+  def __repr__(self):
+    l = [self.template[num] for num in self.state.reshape(1,-1)[0]]
+    return self.total.format(*l)
+
 def switch_player(player, player_list):
   if player == player_list[-1]:
     return player_list[0]
@@ -37,3 +50,8 @@ def action_helper(actions, threshold):
     print('actions:')
     for action in actions:
       print(action)
+
+def turn_helper(turn, state):
+  print(f'Turn {turn}:')
+  board = Board(state.board[0])
+  print(board, end='\n\n')
