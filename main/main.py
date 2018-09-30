@@ -4,23 +4,19 @@ from mcts import UCT
 import datetime
 from util import *
 # action = (idx, i, j, r, f)
-
-
-computer_mode = 'mcts'
-BOARD_SIZE = 5
+# 219, 411, 443, 475
+BOARD_SIZE = 13
 
 if __name__ == '__main__':
-  TIME_BUDGET = 60
+  TIME_BUDGET = 60 * 15
   ITER_BUDGET = 1600
-
-  BLUE, YELLOW = 1, 2
-  num_players = 2
-
-  player_list = [BLUE, YELLOW]
-  human, computer = determine_roles(player_list)
+  
+  blue, yellow = determine_roles()
+  player_1, player_2 = blue.idx, yellow.idx
+  player_list = [player_1, player_2]
 
   env = Blokus(size=BOARD_SIZE, player_list=player_list)
-  mcts = UCT(env, computer, player_list, time_budget=TIME_BUDGET, iter_budget=ITER_BUDGET, exploration=1.4)
+  mcts = UCT(env, player_list, num_workers=2, time_budget=TIME_BUDGET, iter_budget=ITER_BUDGET, exploration=1.4)
   # mcts.initialize()
 
 
@@ -33,46 +29,54 @@ if __name__ == '__main__':
     turn_helper(turn, state)
     actions = env.possible_actions(state, state.player)
 
-    # -------------------------- #
-    #                            #
-    #   get action from player   #
-    #                            #
-    # -------------------------- #
-    if state.player == human:
-      print(f'Player\'s turn. You have {len(actions)} actions left')
-      print('Your pieces:', state.remaining_pieces_all[state.player])
+    # ---------------------------- #
+    #                              #
+    #   get action from player_1   #
+    #                              #
+    # ---------------------------- #
+    if state.player == blue.idx:
+      print(f'{blue.name}\'s turn. {len(actions)} actions left')
+      print('Remaining pieces:\n', state.remaining_pieces_all[state.player])
 
       # Helper functionality
       action_helper(actions, threshold=10)
 
-      while True:
-        action = ask_action(actions)
-        if action[0] in state.remaining_pieces_all[state.player] and env.place_possible(state.board, state.player, action):
-          break
-        else:
-          print('That\'s not possible. Choose another place')
-
-    # -------------------------- #
-    #                            #
-    #    get action from MCTS    #
-    #                            #
-    # -------------------------- #
-    else:
-      print(f'Computer\'s turn. Computer has {len(actions)} actions left')
-      print('Computer\'s pieces:', state.remaining_pieces_all[state.player])
-      action_helper(actions, threshold=10)
-
-      if computer_mode == 'human':
+      if blue.mode == 'human':
         while True:
           action = ask_action(actions)
           if action[0] in state.remaining_pieces_all[state.player] and env.place_possible(state.board, state.player, action):
             break
           else:
             print('That\'s not possible. Choose another place')
-      else:
+      elif blue.mode == 'mcts':
         action = mcts.get_action(state)
+      print('Action chosen:', action)
 
-      print('Computer action:', action)
+    # ---------------------------- #
+    #                              #
+    #   get action from player_2   #
+    #                              #
+    # ---------------------------- #
+    elif state.player == yellow.idx:
+      print(f'{yellow.name}\'s turn. {len(actions)} actions left')
+      print('Remaining pieces:\n', state.remaining_pieces_all[state.player])
+
+      # Helper functionality
+      action_helper(actions, threshold=10)
+
+      if yellow.mode == 'human':
+        while True:
+          action = ask_action(actions)
+          if action[0] in state.remaining_pieces_all[state.player] and env.place_possible(state.board, state.player, action):
+            break
+          else:
+            print('That\'s not possible. Choose another place')
+      elif yellow.mode == 'mcts':
+        action = mcts.get_action(state)
+      print('Action chosen:', action)
+
+    else:
+      raise ValueError('Something went (terribly) wrong.')
 
 
     # -------------------------- #

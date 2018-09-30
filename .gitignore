@@ -61,4 +61,4 @@ target/
 working/
 
 # Mac specific
-**/.DS_Store/
+*/.DS_Store

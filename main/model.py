@@ -190,12 +190,12 @@ class Blokus:
     for i, action in enumerate(prev_actions):
       if not self.place_possible(state.board, player, action) or action[0] not in state.remaining_pieces_all[player]:
         dead_actions.add(action)
-    prev_actions = list(set(prev_actions) - dead_actions)
+    prev_actions = set(prev_actions) - dead_actions
     
     alive = state.board[player, i_s, j_s].astype(bool)
     new_diagonals = state.meta.new_diagonals[player][alive]
 
-    new_actions = []
+    new_actions = set()
     for idx in state.remaining_pieces_all[player]:
       piece = self.pieces[idx]
       for (r, f), data in piece.items():
@@ -211,8 +211,8 @@ class Blokus:
               i, j = pos
               action = (idx, i, j, r, f)
               if self.place_possible(state.board, player, action):
-                new_actions.append(action)
-    actions = prev_actions + new_actions
+                new_actions.add(action)
+    actions = list(prev_actions | new_actions)
     return actions
 
   def place_possible(self, board, player, action):
