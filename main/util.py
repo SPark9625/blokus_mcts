@@ -1,4 +1,7 @@
-import sys
+import sys, os
+from collections import namedtuple
+
+Player = namedtuple('Player', ['mode', 'idx', 'name'])
 
 class Board:
   def __init__(self, state):
@@ -37,13 +40,31 @@ def ask_action(actions):
       print('That\'s not a valid action input. Try again.')
   return action
 
-def determine_roles(player_list):
-  input_ = input('Play first? [y/n] ').strip().lower()
+def determine_roles():
+  os.system('clear')
+  input_ = input('Choose an option:\n1. human vs human\n2. MCTS vs human\n3. MCTS vs MCTS\n\nYour choice: ').strip().lower()
   if input_ == 'q':
     sys.exit()
-  human = player_list[0] if input_ in ['y', 'yes'] else player_list[1]
-  computer = player_list[1] if human == player_list[0] else player_list[0]
-  return human, computer
+  option = int(input_)
+  if option == 1:
+    blue = Player('human', 1, 'Player 1')
+    yellow = Player('human', 2, 'Player 2')
+  elif option == 2:
+    input_ = input('Play first? [y/n] ').strip().lower()
+    if input_ == 'q':
+      sys.exit()
+    if input_ in ['y', 'yes']:
+      blue = Player('human', 1, 'Player')
+      yellow = Player('mcts', 2, 'Computer')
+    elif input_ in ['n', 'no']:
+      blue = Player('mcts', 1, 'Computer')
+      yellow = Player('human', 2, 'Player')
+    else:
+      raise ValueError('Invalid input.')
+  elif option == 3:
+    blue = Player('mcts', 1, 'Computer 1')
+    yellow = Player('mcts', 2, 'Computer 2')
+  return blue, yellow
 
 def action_helper(actions, threshold):
   if len(actions) < threshold:
@@ -52,6 +73,7 @@ def action_helper(actions, threshold):
       print(action)
 
 def turn_helper(turn, state):
+  os.system('clear')
   print(f'Turn {turn}:')
   board = Board(state.board[0])
   print(board, end='\n\n')
