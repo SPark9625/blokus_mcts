@@ -62,3 +62,6 @@ working/
 
 # Mac specific
 */.DS_Store
+
+# vscode
+.vscode/

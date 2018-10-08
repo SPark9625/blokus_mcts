@@ -1,11 +1,16 @@
-import sys, os
-import time, datetime
-import numpy as np
-import random
-from concurrent.futures import ProcessPoolExecutor
-
-from copy import deepcopy
+import datetime
+import multiprocessing
+import os
 import pickle
+import random
+import sys
+import time
+from copy import deepcopy
+
+import numpy as np
+
+# from concurrent.futures import ProcessPoolExecutor
+
 
 BLUE, YELLOW = 1, 2
 
@@ -22,6 +27,22 @@ class UCT:
         self.nodes = {}
 
         self.num_workers = num_workers
+    
+    def work(self, state, root):
+        t0 = time.time()
+        iteration = 0
+        np.random.seed()
+        while time.time() - t0 < self.time_budget and iteration < self.iter_budget:
+            leaf_node = self.tree_policy(root)
+
+            if not leaf_node.terminal:
+                result = self.default_policy(leaf_node)
+            else:
+                result = leaf_node.result
+            self.backup(leaf_node, result)
+            iteration += 1
+            # print(f'\r__iteration: {iteration}__', end='')
+        return root, iteration
 
     def get_action(self, state):
         """Assumes this function is NOT called on a terminal state"""
@@ -29,30 +50,16 @@ class UCT:
         iter_budget = self.iter_budget
         print(f'Start: {datetime.datetime.now()} / Time budget: {time_budget} / Iteration budget: {iter_budget}')
 
-        # t0 = time.time()
-        # iteration = 0
-        # root = self.create_node(state, state.player)
-        # while time.time() - t0 < time_budget and iteration < iter_budget:
-        #     remaining_pieces_all = deepcopy(state.remaining_pieces_all)
-        #     leaf_node = self.tree_policy(root, remaining_pieces_all)
-          
-        #     if not leaf_node.terminal:
-        #         result = self.default_policy(leaf_node, remaining_pieces_all)
-        #     else:
-        #         result = leaf_node.result
-        #     self.backup(leaf_node, result)
-        #     iteration += 1
-        #     print(f'\r__iteration: {iteration}__', end='')
+        root = self.create_node(state)
 
-        with ProcessPoolExecutor(max_workers=self.num_workers) as executor:
-            num_workers = executor._max_workers
+        # root, iteration = self.work(state, root)
+
+        with multiprocessing.Pool(processes=self.num_workers) as pool:
+            num_workers = pool._processes
             print(f'Running {num_workers} agent(s)!')
-            forest = []
-            for i in range(num_workers):
-                future = executor.submit(self.work, state)
-                forest.append(future)
-        roots = [forest[i].result()[0] for i in range(num_workers)]
-        iteration = np.sum([forest[i].result()[1] for i in range(num_workers)])
+            forest = [pool.apply_async(self.work, (state, root)) for i in range(num_workers)]
+            roots = [forest[i].get()[0] for i in range(num_workers)]
+            iteration = np.sum([forest[i].get()[1] for i in range(num_workers)])
         root = self.combine(roots)
 
         print('\n')
@@ -68,54 +75,49 @@ class UCT:
         root.cur_root = False
         return action
 
-    def tree_policy(self, node, remaining_pieces_all):
+    def tree_policy(self, node):
         while not node.terminal:
             if len(node.children) < node.num_actions:
                 # not fully expanded
-                leaf = self.expand(node, remaining_pieces_all)
+                leaf = self.expand(node)
                 return leaf
 
             else:
                 # fully expanded
                 player_in = node.player
                 node = self.best_child(node, self.exploration)
-                remaining_pieces_all[player_in].remove(node.action_in[0])
         return node
 
-    def default_policy(self, node, remaining_pieces_all):
+    def default_policy(self, node):
         terminal = node.terminal
         assert not terminal
         state = node.state
-        player = node.player
 
 
         while not terminal:
             t_start = time.time()
-            actions = self.env.possible_actions(state, player)
+            actions = self.env.possible_actions(state)
             t_action = time.time()
             action = random.choice(actions)
             state, result, terminal, _ = self.env.step(state, action, actions)
             t_step = time.time()
 
-            remaining_pieces_all[player].remove(action[0])
-            player = state.player
+            player = state.board[self.env.TURN, 0, 0]
         return result
 
-    def expand(self, node, remaining_pieces_all):
+    def expand(self, node):
         action = random.choice(node.untried_actions)
         node.untried_actions.remove(action)
-        remaining_pieces_all[node.player].remove(action[0])
 
         next_state, reward, done, _ = self.env.step(node.state, action, node.actions)
         if done:
             actions = []
         else:
-            actions = self.env.possible_actions(next_state, next_state.player)
+            actions = self.env.possible_actions(next_state)
 
         # player = switch_player(node.player, self.player_list)
         kwargs = dict(
             state=next_state,
-            player=next_state.player,
             parent=node,
             action_in=action,
             untried_actions=actions,
@@ -125,7 +127,8 @@ class UCT:
 
         next_node = Node(**kwargs)
         # self.register_node(next_node)
-        node.children[hash(next_state.board[0].tostring())] = next_node
+        main_board = next_state.board[:21] + 2 * next_state.board[21:42]
+        node.children[hash(main_board.tostring())] = next_node
         return next_node
 
     def backup(self, node, result):
@@ -150,26 +153,28 @@ class UCT:
         return best
 
 
-    def get_node(self, s0, player):
+    def get_node(self, state, player):
         try:
             raise KeyError('Temporary')
-            node = self.nodes[hash(s0.board[0].tostring())]
+            main_board = state.board[:21] + 2 * state.board[21:42]
+            node = self.nodes[hash(main_board.tostring())]
             node.parent = None
             print("Returning the requested Node...")
             return node
 
         except KeyError:
-            node = self.create_node(s0, player)
+            node = self.create_node(state)
             print("Couldn't find the requested Node. Creating a new one...")
             return node
 
     def register_node(self, node):
         raise KeyError("Temporary")
-        self.nodes[node.hash(state.board[0].tostring())] = node
+        main_board = node.state.board[:21] + 2 * node.state.board[21:42]
+        self.nodes[hash(main_board.tostring())] = node
 
-    def create_node(self, s0, player):
-        actions = self.env.possible_actions(s0, player)
-        node = Node(s0, player=player, parent=None, action_in=None, untried_actions=actions, cur_root=True)
+    def create_node(self, state):
+        actions = self.env.possible_actions(state)
+        node = Node(state, parent=None, action_in=None, untried_actions=actions, cur_root=True)
         # self.register_node(node)
         return node
 
@@ -179,27 +184,9 @@ class UCT:
             root += roots[i]
         return root
 
-    def work(self, state):
-        root = self.create_node(state, state.player)
-
-        t0 = time.time()
-        iteration = 0
-        while time.time() - t0 < self.time_budget and iteration < self.iter_budget:
-            remaining_pieces_all = deepcopy(state.remaining_pieces_all)
-            leaf_node = self.tree_policy(root, remaining_pieces_all)
-          
-            if not leaf_node.terminal:
-                result = self.default_policy(leaf_node, remaining_pieces_all)
-            else:
-                result = leaf_node.result
-            self.backup(leaf_node, result)
-            iteration += 1
-          # print(f'__iteration: {iteration}__{os.getpid()}')
-        return root, iteration
-
 
 class Node:
-    def __init__(self, state, player, parent, action_in, untried_actions, terminal=False, result=None, cur_root=False):
+    def __init__(self, state, parent, action_in, untried_actions, terminal=False, result=None, cur_root=False):
         # distinguishing feature
         self.state = state
 
@@ -217,7 +204,7 @@ class Node:
         self.terminal = terminal
         self.result = result
 
-        self.player = player
+        self.player = state.board[-1, 0, 0]
         self.cur_root = cur_root
 
     @property
