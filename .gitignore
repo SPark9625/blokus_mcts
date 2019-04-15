@@ -61,7 +61,13 @@ target/
 working/
 
 # Mac specific
-*/.DS_Store
+*.DS_Store
 
 # vscode
 .vscode/
+
+# images
+images/
+
+# other
+archive/

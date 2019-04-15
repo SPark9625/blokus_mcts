@@ -1,5 +1,6 @@
 import sys, os
 from collections import namedtuple
+import numpy as np
 
 Player = namedtuple('Player', ['mode', 'idx', 'name'])
 
@@ -18,7 +19,7 @@ class Board:
         l = [self.template[num] for num in self.state.reshape(1,-1)[0]]
         return self.total.format(*l)
 
-def ask_action(actions):
+def ask_action():
     while True:
         input_ = input('Input an action in the format (piece_id, i, j, r, f): ').strip().lower()
         if input_ == 'q':
@@ -31,18 +32,23 @@ def ask_action(actions):
                 continue
         try:
             action = eval(input_)
-            assert isinstance(action, tuple) and len(action) == 5
+            assert isinstance(action, tuple) and len(action) in [3, 5]
             break
         except:
             print('That\'s not a valid action input. Try again.')
     return action
 
 def determine_roles():
-    os.system('clear')
-    input_ = input('Choose an option:\n1. human vs human\n2. MCTS vs human\n3. MCTS vs MCTS\n\nYour choice: ').strip().lower()
-    if input_ == 'q':
-        sys.exit()
-    option = int(input_)
+    while True:
+        try:
+            os.system('clear')
+            input_ = input('Choose an option:\n1. human vs human\n2. MCTS vs human\n3. MCTS vs MCTS\n\nYour choice: ').strip().lower()
+            if input_ == 'q':
+                sys.exit()
+            option = int(input_)
+            break
+        except:
+            pass
 
     if option == 1:
         p1_name = input("Enter the name for Player 1: ").strip()
@@ -74,18 +80,25 @@ def action_helper(actions, threshold):
         for action in actions:
             print(action)
 
-def turn_helper(turn, state):
-    os.system('clear')
+def turn_helper(turn, state, color=None, remaining_pieces=None, done=False):
+    # os.system('clear')
     print(f'Turn {turn}:')
     board = Board(state)
     print(board, end='\n\n')
+    if not done:
+        print(f'{color.name}\'s turn. {len(state.meta.actions[color.idx])} actions left')
+        print('Remaining pieces:\n', remaining_pieces)
 
-def action_wrapper(color, state, actions, env, mcts):
+def action_wrapper(color, state, env, mcts):
     remaining_pieces = env.get_remaining_pieces(state, color.idx)
     if color.mode == 'human':
         while True:
-            action = ask_action(actions)
-            if action[0] in remaining_pieces and env.place_possible(state.board, color.idx, action):
+            action = ask_action()
+            if len(action) == 3:
+                idx = env.layer2irf[action[0]][0]
+            else:
+                idx = action[0]
+            if idx in remaining_pieces and env.place_possible(state.board, color.idx, action):
                 break
             else:
                 print('That\'s not possible. Choose another place')
@@ -93,3 +106,8 @@ def action_wrapper(color, state, actions, env, mcts):
         action = mcts.get_action(state)
     print('Action chosen:', action)
     return action
+
+def softmax(x):
+    x -= x.max()
+    exp_x = np.exp(x)
+    return exp_x / exp_x.sum()

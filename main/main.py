@@ -1,3 +1,11 @@
+"""
+This file lets you play:
+(No training involved)
+    1. Human vs Human
+    2. Human vs Agent
+    3. Agent vs Agent
+"""
+
 import datetime
 import multiprocessing
 import random
@@ -5,63 +13,44 @@ import sys
 
 import numpy as np
 
-from mcts import UCT
+# from mcts_naive import UCT
+# from mcts_agz import MCTS
 from model import Blokus
-from util import *
-
-# action = (idx, i, j, r, f)
-# 219, 411, 443, 475
-
+from config import config
+import util
 
 if __name__ == '__main__':
-    multiprocessing.set_start_method('forkserver')
+    blue, yellow = util.determine_roles()
 
-    BOARD_SIZE = 13
+    env = Blokus()
+    # mcts = UCT(env, exploration=1.4)
+    mcts = None
+    if blue.mode == 'mcts' or yellow.mode == 'mcts':
+        print('Creating agent...')
+        mcts = MCTS(env, tau=1).eval()
 
-    TIME_BUDGET = 30
-    ITER_BUDGET = 400
-
-    NUM_WORKERS = 2
-
-    blue, yellow = determine_roles()
-    player_list = [blue.idx, yellow.idx]
-
-    env = Blokus(board_size=BOARD_SIZE, player_list=player_list)
-    mcts = UCT(env, player_list, num_workers=NUM_WORKERS, time_budget=TIME_BUDGET, iter_budget=ITER_BUDGET, exploration=1.4)
 
     turn = 0
     state = env.reset()
-
-    get_pieces_slice = {blue.idx: slice(21), yellow.idx: slice(21,42)}
-
-
     while True:
-        turn_helper(turn, state)
-        actions = env.possible_actions(state)
-        player = state.board[env.TURN, 0, 0]
-
-        # get action 
+        player = state.board[-1, 0, 0]
+        actions = state.meta.actions[player]
         color = blue if player == blue.idx else yellow
-        print(f'{color.name}\'s turn. {len(actions)} actions left')
         remaining_pieces = env.get_remaining_pieces(state, player)
-        print('Remaining pieces:\n', remaining_pieces)
 
-        # Helper functionality -- prints out actions if the number of possible actions is below a certain threshold
-        action_helper(actions, threshold=10)
+        util.turn_helper(turn, state, color, remaining_pieces)
+        
 
-        # Returns an action either by asking (if mode is 'human'), or by running the mcts agent.
-        action = action_wrapper(color, state, actions, env, mcts)
+        # Print actions if len(actions) < threshold
+        util.action_helper(actions, threshold=10)
 
-        # -------------------------- #
-        #         env.step()         #
-        # -------------------------- #
+        # Get action either from human or from the agent
+        action = util.action_wrapper(color, state, env, mcts)
+
         state, reward, done, _ = env.step(state, action, actions)
 
-        # -------------------------- #
-        #        bookkeeping         #
-        # -------------------------- #
         turn += 1
         if done:
-            turn_helper(turn, state)
+            util.turn_helper(turn, state, done=True)
             print('Game finished. Rewards:', reward)
             break

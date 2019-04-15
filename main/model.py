@@ -1,143 +1,76 @@
 from collections import namedtuple
 from copy import deepcopy
 
-# import matplotlib as mpl
-# mpl.use('TkAgg')
-# import matplotlib.pyplot as plt
 import numpy as np
 
+from config import config
 
 State = namedtuple('State', ['board', 'meta'])
 Meta = namedtuple('Meta', ['actions', 'new_diagonals'])
 
-# the board (np.ndarray) should contain all the necessary information to make the optimal decision
-# i.e. Information about the remaining pieces, `first`, `done`, and the current player should all be encoded in the np.ndarray.
-
-# Solution
-# board[  :21]: Player 1's pieces. np.zeros() if piece hasn't been used
-# board[21:42]: Player 2's pieces.
-# board[42]: Player 1's diagonal positions.
-# board[43]: Player 2's diagonal positions.
-# board[44]: Player 1's neighboring positions
-# board[45]: Player 2's neighboring positions.
-# board[46]: if Player 1 is placing for the first time
-# board[47]: if Player 2 is placing for the first time
-# board[48]: if Player 1 is finished
-# board[49]: if Player 2 is finished
-# board[50]: Who's turn.
-
 class Blokus:
-    def __init__(self, board_size, player_list):
-        self.SIZE = board_size
-        self.player_list = player_list
-        self.NUM_PLAYERS = len(player_list)
-        self.NUM_PIECES = 21
-        self.NUM_STATE_LAYERS = self.NUM_PLAYERS * (self.NUM_PIECES + 4) + 1
+    def __init__(self):
+        self.pieces = config.pieces
 
-        self.DIAGONAL = self.NUM_PLAYERS * self.NUM_PIECES
-        self.NEIGHBOR = self.DIAGONAL + self.NUM_PLAYERS
-        self.FIRST = self.NEIGHBOR + self.NUM_PLAYERS
-        self.DONE = self.FIRST + self.NUM_PLAYERS
-        self.TURN = -1
+        self.SIZE           = config.board_size
+        self.player_list    = config.player_list
+        self.N_PLAYERS      = config.num_players
+        self.N_PIECES       = config.num_pieces
+        self.N_STATE_LAYER  = config.num_state_layers
+        self.N_ACTION_LAYER = config.num_action_layers
+        self.BOARD_SHAPE    = config.board_shape
+        self.ACTION_SHAPE   = config.action_shape
 
-        # each piece is a dictionary of `data`, `neighbors`, `diagonals` and `rotflip`
-        self.pieces = {}
-        with open('pieces.txt', 'r') as f:
-            for idx, line in enumerate(f):
-                block, corners, neighbors_idx, diagonals_idx, meta = eval(line)
+        self.layer2irf = config.layer2irf
+        self.irf2layer = config.irf2layer
+        self.idx2slice = config.idx2slice
 
-                block = np.array(block, dtype=np.int8)
-                corners = np.array(corners, dtype=np.int8)
-                width, height = len(block[0]), len(block)
-                neighbors = np.zeros((height + 2, width + 2), dtype=np.int8)
-                diagonals = np.zeros((height + 2, width + 2), dtype=np.int8)
-                for _i,_j in neighbors_idx:
-                    neighbors[1+_i,1+_j] = 1
-                for _i,_j in diagonals_idx:
-                    diagonals[1+_i,1+_j] = 1
+        self.DIAGONAL = self.N_PLAYERS * self.N_PIECES
+        self.NEIGHBOR = self.DIAGONAL + self.N_PLAYERS
+        self.FIRST    = self.NEIGHBOR + self.N_PLAYERS
+        self.DONE     = self.FIRST + self.N_PLAYERS
+        self.TURN     = -1
 
-                piece = {}
-                for i in range(4):
-                    rot_block = np.rot90(block, i)
-                    rot_corners = np.rot90(corners, i)
-                    rot_neighbors = np.rot90(neighbors, i)
-                    rot_diagonals = np.rot90(diagonals, i)
-
-                    rot_already_in = np.array([np.array_equal(rot_block, d) for d in [d[0] for d in piece.values()]]).any()
-                    if not rot_already_in:
-                        piece[(i,0)] = [rot_block, rot_corners, rot_neighbors, rot_diagonals]
-
-                    flip_block = np.fliplr(rot_block)
-                    flip_corners = np.fliplr(rot_corners)
-                    flip_neighbors = np.fliplr(rot_neighbors)
-                    flip_diagonals = np.fliplr(rot_diagonals)
-
-                    flip_already_in = np.array([np.array_equal(flip_block, d) for d in [d[0] for d in piece.values()]]).any()
-                    if not flip_already_in:
-                        piece[(i,1)] = [flip_block, flip_corners, flip_neighbors, flip_diagonals]
-                self.pieces[idx] = piece
-
-        # `layer2irf` maps action layer number to (idx, r, f)
-        self.layer2irf = []
-
-        # `idx2slice` maps piece idx to slice on the layer2irf
-        self.idx2slice = [None for i in range(self.NUM_PIECES)]
-        for i in range(self.NUM_PIECES):
-            keys = list(self.pieces[i].keys())
-            start = len(self.layer2irf)
-            end = start + len(keys)
-            
-            self.layer2irf += [(i, r, f) for r, f in keys]
-            self.idx2slice[i] = slice(start, end)
-        self.irf2layer = {key: i for i, key in enumerate(self.layer2irf)}
-        self.NUM_ACTION_LAYERS = len(self.layer2irf)
 
     def reset(self):
-        '''
-        # board[  :21]: Player 1's pieces. np.zeros() if piece hasn't been used
-        # board[21:42]: Player 2's pieces.
+        '''Assuming two players:
+            - board[  :21]: Player 1's pieces. np.zeros() if piece hasn't been used
+            - board[21:42]: Player 2's pieces.
 
-        # board[42]: Player 1's diagonal positions.
-        # board[43]: Player 2's diagonal positions.
-        
-        # board[44]: Player 1's neighboring positions
-        # board[45]: Player 2's neighboring positions.
-        
-        # board[46]: if Player 1 is placing for the first time
-        # board[47]: if Player 2 is placing for the first time
-        
-        # board[48]: if Player 1 is finished
-        # board[49]: if Player 2 is finished
-        
-        # board[50]: Who's turn.
+            - board[42]: Player 1's diagonal positions.
+            - board[43]: Player 2's diagonal positions.
+            
+            - board[44]: Player 1's neighboring positions
+            - board[45]: Player 2's neighboring positions.
+            
+            - board[46]: if Player 1 is placing for the first time
+            - board[47]: if Player 2 is placing for the first time
+            
+            - board[48]: if Player 1 is finished
+            - board[49]: if Player 2 is finished
+            
+            - board[50]: Who's turn.
 
-        player = int(1 ~ num_players)
-        player_list = list of players
-        remaining_pieces_all = dict with key(player), value(list of available piece indices)
-        first = dict with key(player), value(bool)
+        isinstance(player, int) == True
+        isinstance(player_list, list) == True
         '''
-        board = np.zeros((self.NUM_STATE_LAYERS, self.SIZE, self.SIZE), dtype=np.int8)
+        board = np.zeros(self.BOARD_SHAPE, dtype=np.int8)
 
         first_pos = np.array([[[0,0]],[[self.SIZE-1,self.SIZE-1]]])
         for p in self.player_list:
-            # diagonal layers
+            # `diagonal` layers
             board[self.DIAGONAL + p][tuple(first_pos[p,0])] = 1
-
-            # first layers
+            # Set `first` to True
             board[self.FIRST + p] = 1
 
-        # piece_keys = [list(self.pieces.keys()) for i in range(self.NUM_PLAYERS)]
-        # remaining_pieces_all = {p: p_list for p, p_list in zip(self.player_list, piece_keys)}
-        # player = self.player_list[0]
-        # first = {p: True for p in self.player_list}
-        # done = {p: False for p in self.player_list}
-
+        # To speed up calculation in `possible_actions` and `_check_player_finished`
         new_diagonals_all = [first_pos[p] for p in self.player_list]
-        actions_all = [[] for p in self.player_list]
+        actions_all       = [[] for p in self.player_list]
         meta = Meta(actions_all, new_diagonals_all)
 
         state = State(board, meta)
-
+        actions = self.possible_actions(state, self.player_list[0])
+        state.meta.actions[self.player_list[0]] = actions
         return state
 
 
@@ -145,7 +78,7 @@ class Blokus:
         """
         Arguments:
             state {np.ndarray} -- self.NUM_STATE_LAYERS * self.SIZE * self.SIZE
-            action {tuple} -- rank 5
+            action {tuple} -- rank 5 or 3
             actions {np.ndarray} -- list of actions
         
         Raises:
@@ -155,25 +88,23 @@ class Blokus:
             next_state, reward, done, info -- follows OpenAI's gym API.
         """
 
-        # action = (piece_id, rotation, flip, i, j)
+        # action = (piece_id, rotation, flip, i, j) *OR*
+        # action = (layer, i, j)
         # this assumes a valid action
         next_board = state.board.copy()
         player = next_board[self.TURN, 0, 0]
-        # remaining_pieces_all = deepcopy(state.remaining_pieces_all)
-        # first = deepcopy(state.first)
-        # done = deepcopy(state.done)
-        # player = state.player
 
         can_place = self.place_possible(state.board, player, action)
         if not can_place:
             raise ValueError(f"You can't place here.\nplayer: {player}\naction: {action}\nboard:\n{state.board}")
 
-        idx, r, f, i, j = action
+        if len(action) == 5:
+            idx, r, f, i, j = action
+        elif len(action) == 3:
+            layer, i, j = action
+            idx, r, f = self.layer2irf[layer]
         piece = self.pieces[idx]
 
-        # -------------------- #
-        # DEEPCOPY NOT NEEDED? #
-        # -------------------- #
         if (r, f) in piece.keys():
             block, corners, neighbors, diagonals = deepcopy(piece[(r, f)])
         else:
@@ -181,12 +112,12 @@ class Blokus:
 
         width, height = len(block[0]), len(block)
         # update main board: assumes a valid action, thus just add.
-        next_board[self.NUM_PIECES*player + idx, i:i+height, j:j+width] += block
+        next_board[self.N_PIECES*player + idx, i:i+height, j:j+width] += block
 
         first = next_board[self.FIRST + player, 0, 0]
         if first:
             next_board[self.DIAGONAL + player,[0,0,self.SIZE-1,self.SIZE-1],[0,self.SIZE-1,0,self.SIZE-1]] = 0
-            next_board[self.FIRST + player] = 0
+            next_board[self.FIRST + player] = int(False)
 
         # calculate outer slices
         diagonals, neighbors, x_outer_slice, y_outer_slice = self.fit_to_board(
@@ -210,7 +141,7 @@ class Blokus:
         # ------------------- #
         # This has to be perfectly accurate at all times.
         # First, remove any existing diagonals where a piece is about to be placed.
-        focus = next_board[self.DIAGONAL:self.DIAGONAL + self.NUM_PLAYERS, i:i+height, j:j+width]
+        focus = next_board[self.DIAGONAL:self.DIAGONAL + self.N_PLAYERS, i:i+height, j:j+width]
         focus[np.logical_and(focus, block)] = 0
 
         outer_diagonals = next_board[self.DIAGONAL + player, y_outer_slice, x_outer_slice]
@@ -235,7 +166,7 @@ class Blokus:
         offset = [y_outer_slice.start, x_outer_slice.start]
         new_diagonals = np.argwhere(diagonals) + offset  # (N, 2) np.ndarray
 
-
+        # For metadata
         actions_all = deepcopy(state.meta.actions)
         new_diagonals_all = deepcopy(state.meta.new_diagonals)
 
@@ -244,12 +175,10 @@ class Blokus:
         new_diagonals_all[player] = new_diagonals
 
         meta = Meta(actions_all, new_diagonals_all)
-
         next_state = State(next_board, meta)
 
-        # ---------------------- check ------------------------- #
         game_done = self._check_game_finished(next_state)
-        # ------------------------------------------------------ #
+
 
         # if current player is not done, this just returns the next player that
         # wasn't finished at the beginning of the current player's turn
@@ -260,14 +189,14 @@ class Blokus:
 
         reward = [0 for p in self.player_list]  # game hasn't finished, or is a draw
         if game_done:
-            scores = [next_board[p*self.NUM_PIECES:(p+1)*self.NUM_PIECES].sum() for p in self.player_list]
+            scores = [next_board[p*self.N_PIECES:(p+1)*self.N_PIECES].sum() for p in self.player_list]
             if scores[0] > scores[1]:
                 reward = [1, -1]
             elif scores[0] < scores[1]:
                 reward = [-1, 1]
         return next_state, reward, game_done, None
 
-    def possible_actions(self, state):
+    def possible_actions(self, state, player):
         """
         Calculates all possible actions for a player.
 
@@ -277,24 +206,23 @@ class Blokus:
         Returns:
             all possible actions
         """
-        player = state.board[self.TURN, 0, 0]
 
-        # Use metadata s.t. disabled actions are quickly removed and only additional diagonals are checked
-        prev_actions = state.meta.actions[player]  # 91 * 13 * 13
-        # prev_actions = self.actions_mat2vec(prev_actions_mat)
+        # disabled actions can be quickly removed and only additional diagonals are checked thoroughly
+        prev_actions = state.meta.actions[player]  # list of 3 dim tuples
 
-        i_s,j_s = state.meta.new_diagonals[player].T
+        i_s, j_s = state.meta.new_diagonals[player].T
+        remaining_pieces = self.get_remaining_pieces(state, player)
 
         dead_actions = set()
         for action in prev_actions:
-            if not self.place_possible(state.board, player, action):
+            idx = self.layer2irf[action[0]][0]
+            if idx not in remaining_pieces or not self.place_possible(state.board, player, action):
                 dead_actions.add(action)
         prev_actions = set(prev_actions) - dead_actions
 
         alive = state.board[self.DIAGONAL + player, i_s, j_s].astype(bool)
         new_diagonals = state.meta.new_diagonals[player][alive]
 
-        remaining_pieces = self.get_remaining_pieces(state, player)
         new_actions = set()
         for diag_pos in new_diagonals:
             for idx in remaining_pieces:
@@ -309,29 +237,26 @@ class Blokus:
                                 continue
                             else:
                                 i, j = pos
-                                action = (idx, r, f, i, j)
+                                layer = self.irf2layer[(idx, r, f)]
+                                action = (layer, i, j)
                                 if self.place_possible(state.board, player, action):
                                     new_actions.add(action)
         actions = list(prev_actions | new_actions)
         return actions
 
-    # def actions_mat2vec(self, actions):
-    #     out = set()
-    #     for layer, i, j in np.argwhere(actions):
-    #         idx, r, f = self.layer2irf[layer]
-    #         action = (idx, r, f, i, j)
-    #         out.add(action)
-    #     return out
-
     def get_remaining_pieces(self, state, player):
         player_pieces_slice = slice(
-            player*self.NUM_PIECES, (player+1)*self.NUM_PIECES)
+            player*self.N_PIECES, (player+1)*self.N_PIECES)
         used = state.board[player_pieces_slice].any(axis=(1, 2))
         remaining_pieces = np.argwhere(~used).flatten()
         return remaining_pieces
 
     def place_possible(self, board, player, action):
-        idx, r, f, i, j = action
+        if len(action) == 5:
+            idx, r, f, i, j = action
+        elif len(action) == 3:
+            layer, i, j = action
+            idx, r, f = self.layer2irf[layer]
 
         piece = self.pieces[idx]
         if (r, f) in piece.keys():
@@ -343,23 +268,14 @@ class Blokus:
         # check overlap
         if np.logical_and(board[:self.DIAGONAL, i:i+height, j:j+width], block).any():
             return False
-        # focus = board[0, i:i+height, j:j+width]
-        # if np.any(np.logical_and(block, focus)):
-        #     return False
 
         # check if there are any common flat edge
         if np.logical_and(board[self.NEIGHBOR + player, i:i+height, j:j+width], block).any():
             return False
-        # focus = board[self.NUM_PLAYERS + player, i:i+height, j:j+width]
-        # if np.any(np.logical_and(block, focus)):
-        #     return False
 
         # make sure the corners touch
         if np.logical_and(board[self.DIAGONAL + player, i:i+height, j:j+width], block).any():
             return True
-        # focus = board[player, i:i+height, j:j+width]
-        # if np.any(np.logical_and(block, focus)):
-        #     return True
 
         return False
 
@@ -368,14 +284,15 @@ class Blokus:
         prev_actions = meta.actions[player]
         i_s,j_s = meta.new_diagonals[player].T
 
+        remaining_pieces = self.get_remaining_pieces(state, player)
         for action in prev_actions:
-            if self.place_possible(board, player, action):
+            idx = self.layer2irf[action[0]][0]
+            if idx in remaining_pieces and self.place_possible(board, player, action):
                 return False
 
 
         alive = board[self.DIAGONAL + player, i_s, j_s].astype(bool)
         new_diagonals = meta.new_diagonals[player][alive]
-        remaining_pieces = self.get_remaining_pieces(state, player)
         for idx in remaining_pieces:
             piece = self.pieces[idx]
             for (r, f), data in piece.items():
@@ -403,15 +320,30 @@ class Blokus:
         finished = True
 
         cur = board[self.TURN, 0, 0]
+        next_flag = False  # When checking next player, calculate all possible moves
         for p in self.player_list:
-            player = (cur + p) % self.NUM_PLAYERS  # start from the currect player
+            player = (cur + p) % self.N_PLAYERS  # start from the currect player
             if not board[self.DONE + player, 0, 0]:
-                if self._check_player_finished(state, player):
-                    board[self.DONE + player] = 1  # set done to True
-                else:
-                    finished = False
-                    if player != cur:
+                # Calculate if player has any actions left
+                if next_flag:
+                    next_flag = False
+                    actions = self.possible_actions(state, player)
+                    state.meta.actions[player] = actions
+                    if len(actions) > 0:
+                        finished = False
                         break
+                    else:
+                        board[self.DONE + player] = 1  # set done to True
+                        continue
+                else:
+                    if self._check_player_finished(state, player):
+                        board[self.DONE + player] = 1  # set done to True
+                    else:
+                        finished = False
+                        if player != cur:
+                            break
+                    if player == cur:
+                        next_flag = True
         return finished
 
     @staticmethod
@@ -469,13 +401,13 @@ class Blokus:
         This assumes that players are ordered integers.
         If no one is alive, returns None
         """
-        nxt = board[self.TURN, 0, 0] + 1
+        nex = board[self.TURN, 0, 0] + 1
         for p in self.player_list:
-            player = (nxt + p) % self.NUM_PLAYERS  # start from the next player
+            player = (nex + p) % self.N_PLAYERS  # start from the next player
             if board[self.DONE + player, 0, 0] == 0:
                 return player
 
 if __name__ == '__main__':
-    env = Blokus(5, [0,1])
-    while True:
-        eval(input())
+    env = Blokus()
+    # while True:
+    #     eval(input())
